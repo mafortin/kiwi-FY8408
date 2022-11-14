@@ -1,0 +1,6 @@
+connected_components_3d==3.10.2
+matplotlib==3.5.1
+numpy==1.22.3
+pydicom==2.3.0
+scikit_image==0.19.2
+skimage==0.0

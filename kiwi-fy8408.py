@@ -10,7 +10,7 @@ import matplotlib
 import os
 import pydicom as dicom
 import cc3d
-import cv2 as cv
+import cv2
 import skimage
 
 all_acqs = ['E27', 'E28', 'E26', 'E30', 'E18']
@@ -54,6 +54,76 @@ def determine_start_end(data):
 
     plt.close()
     plt.ioff()
+
+
+def count_seeds_2(data, first_slice, last_slice):
+
+    dims = data.shape
+    ww, hh = data.shape[1:3]
+    hh2 = hh // 2
+    ww2 = ww // 2
+
+    # define ellipse for mask
+    mask = np.zeros(data.shape[1:3])
+    center = (hh2, ww2)
+    mask = cv2.ellipse(mask, center=center, axes=(45, 25), angle=0, startAngle=0, endAngle=360,
+                       color=(255, 255, 255), thickness=-1)
+
+    # other preprocessing test
+    kernel = 30
+    max_kernel = []
+    local_max = []
+    for slice in range(dims[0]):
+        max_kernel.append(cv2.getStructuringElement(cv2.MORPH_RECT, (kernel, kernel)))
+        local_max.append(cv2.morphologyEx(data[slice, ...], cv2.MORPH_CLOSE, max_kernel[slice], None, None, 1,
+                                    cv2.BORDER_REFLECT101))
+
+    gain_division = np.where(local_max == 0, 0, (data / local_max))
+    gain_division = np.clip((255 * gain_division), 0, 255)
+    gain_division = gain_division.astype("uint8")
+
+    result = []
+    cont_count = []
+    for slice in range(data.shape[0]):
+        masked = data[slice, ...] * mask
+        thresh_otsu = skimage.filters.threshold_otsu(masked)
+        res = masked > thresh_otsu * 1.2
+        (contours, _) = cv2.findContours(res.astype('uint8'), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        cont_count.append(contours)
+        result.append(res)
+
+    result = np.asarray(result)
+    # cut to part where seeds are visible
+    result = result[first_slice:last_slice, ...]
+    data = data[first_slice:last_slice, ...]
+    gain_division = gain_division[first_slice:last_slice, ...]
+
+    connectivity_3d = 6
+
+    # the input to the 3D connected components algorithm is the mask (not the masked image)
+    # TODO: refine region of interest to only check for seeds around
+    labels_out, N = cc3d.connected_components(result, connectivity=connectivity_3d, return_N=True)
+    print('Seeds in 3D contour: {}'.format(N))
+
+    counter = 0
+    connectivity_2d = 6
+    for slice in range(result.shape[0]):
+        _, N = cc3d.connected_components(result[slice, ...], connectivity=connectivity_2d, return_N=True)
+        counter += N
+    print('Seeds in 2D contour: {}'.format(counter))
+
+    fig, axs = plt.subplots(1, 3)
+    fig.suptitle(acq)
+    axs[0].imshow(data[int(dims[0] / 2), :, :], cmap='gray')
+    axs[0].set_title('Original Image')
+    axs[0].axis('off')
+    axs[1].imshow(result[int(dims[0] / 2)], cmap='gray')
+    axs[1].set_title('Masked Image')
+    axs[1].axis('off')
+    axs[2].imshow(gain_division[int(dims[0] / 2)], cmap='gray')
+    axs[2].set_title('Gain-division Image')
+    axs[2].axis('off')
+    plt.show()
 
 
 def count_seeds(data, first_slice, last_slice):
@@ -119,5 +189,5 @@ if __name__ == '__main__':
     FIRST_SLICE = 5
     LAST_SLICE = 47
 
-    count_seeds(data, FIRST_SLICE, LAST_SLICE)
+    count_seeds_2(data, FIRST_SLICE, LAST_SLICE)
 
